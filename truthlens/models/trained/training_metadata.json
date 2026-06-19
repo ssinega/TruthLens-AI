@@ -1,0 +1,37 @@
+{
+  "trained_at": "2026-06-09T10:26:32Z",
+  "models": {
+    "logistic_regression": {
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "fit_time_s": 0.01,
+      "saved_at": "D:\\Truthlens\\truthlens\\models\\trained\\logistic_regression.pkl"
+    },
+    "random_forest": {
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "fit_time_s": 0.19,
+      "saved_at": "D:\\Truthlens\\truthlens\\models\\trained\\random_forest.pkl"
+    },
+    "passive_aggressive": {
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "fit_time_s": 0.0,
+      "saved_at": "D:\\Truthlens\\truthlens\\models\\trained\\passive_aggressive.pkl"
+    },
+    "linear_svc": {
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "fit_time_s": 0.01,
+      "saved_at": "D:\\Truthlens\\truthlens\\models\\trained\\linear_svc.pkl"
+    },
+    "voting_ensemble": {
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "fit_time_s": 2.6,
+      "saved_at": "D:\\Truthlens\\truthlens\\models\\trained\\voting_ensemble.pkl"
+    }
+  },
+  "tfidf_features": 10000,
+  "cluster_n": 4
+}

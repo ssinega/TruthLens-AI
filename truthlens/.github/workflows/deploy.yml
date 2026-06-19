@@ -1,0 +1,100 @@
+name: TruthLens CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install core dependencies
+        run: |
+          pip install --upgrade pip
+          pip install streamlit scikit-learn pandas numpy nltk vaderSentiment plotly joblib anthropic python-dotenv
+
+      - name: Download NLTK data
+        run: |
+          python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet'); nltk.download('punkt_tab')"
+
+      - name: Smoke test imports
+        run: |
+          python -c "
+          import streamlit
+          import sklearn
+          import pandas
+          import numpy
+          import plotly
+          print('✅ Core imports OK')
+          "
+        working-directory: truthlens
+
+      - name: Test utility modules
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from utils.text_preprocessor import TextPreprocessor
+          from utils.feature_extractor import FeatureExtractor, SENSATIONAL_WORDS
+          from utils.credibility_scorer import CredibilityScorer
+
+          tp = TextPreprocessor()
+          cleaned = tp.clean('SHOCKING: Scientists EXPOSED!! You won\\'t believe this bombshell!')
+          print(f'TextPreprocessor OK: {cleaned[:50]}')
+
+          fe = FeatureExtractor()
+          feats = fe.extract_linguistic_features('This is a test article about science.')
+          print(f'FeatureExtractor OK: {len(feats)} features')
+
+          scorer = CredibilityScorer()
+          score, breakdown = scorer.compute_truth_score(0.7, 0.6, 0.5, 0.8, 0.2, 0.8, 'REAL')
+          print(f'CredibilityScorer OK: TruthScore={score}')
+          print('✅ All utility modules OK')
+          "
+        working-directory: truthlens
+
+      - name: Test prediction pipeline (demo mode)
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from models.predict import PredictionPipeline
+          pipeline = PredictionPipeline(demo_mode=True)
+          result = pipeline.predict('This is a test article.', demo_mode=True)
+          assert 'ensemble_label' in result
+          assert 'truth_score' not in result  # predict returns raw model output
+          print(f'PredictionPipeline OK: {result[\"ensemble_label\"]}')
+          print('✅ PredictionPipeline demo mode OK')
+          "
+        working-directory: truthlens
+
+      - name: Check Claude AI integration (no key needed — graceful fallback)
+        run: |
+          python -c "
+          import os
+          os.environ['ANTHROPIC_API_KEY'] = ''  # empty — should gracefully handle
+          try:
+              import anthropic
+              print('✅ anthropic package importable')
+          except ImportError:
+              print('⚠️  anthropic not installed — Claude features will be disabled')
+          "
