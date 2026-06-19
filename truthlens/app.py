@@ -1186,7 +1186,7 @@ def inject_css() -> None:
     st.markdown("".join(bg_html), unsafe_allow_html=True)
 
     # ── JS: Force cosmic gradient on ALL Streamlit wrappers at runtime ─────────
-    st.markdown("""
+    st.markdown(clean_html("""
     <script>
     (function applyCosmicTheme() {
         const BG = 'linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%)';
@@ -1217,7 +1217,7 @@ def inject_css() -> None:
         [500, 1000, 2000, 4000].forEach(function(t){ setTimeout(paint, t); });
     })();
     </script>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
 
 
@@ -1522,7 +1522,7 @@ def render_input_panel() -> Tuple[str, str, str]:
                 if article_text:
                     st.success(f"✅ Extracted {len(article_text.split())} words.")
                     with st.expander("Preview extracted text"):
-                        st.markdown(article_text[:800] + "...")
+                        st.text(article_text[:800] + "...")
                 else:
                     st.error("❌ Could not extract text from this URL.")
         input_source = "url"
@@ -2344,7 +2344,7 @@ def render_credibility_breakdown(breakdown: dict) -> None:
             else "#00C851"
         )
 
-        st.markdown(f"""
+        st.markdown(clean_html(f"""
         <div style="margin: 10px 0;" title="{help_texts.get(signal, '')}">
             <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
                 <span style="font-size:0.85rem; color:#F0F4FF;">{icon} {signal}</span>
@@ -2356,7 +2356,7 @@ def render_credibility_breakdown(breakdown: dict) -> None:
                             transition: width 0.8s ease;"></div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
 
 def render_lime_explanation(lime_weights: list, text: str) -> None:
@@ -2627,7 +2627,7 @@ def render_learning_module() -> None:
         ]
 
         for algo_name, algo_type, description in algo_info:
-            st.markdown(f"""
+            st.markdown(clean_html(f"""
             <div class="algo-card">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span class="algo-name">{algo_name}</span>
@@ -2636,7 +2636,7 @@ def render_learning_module() -> None:
                 </div>
                 <div class="algo-desc">{description}</div>
             </div>
-            """, unsafe_allow_html=True)
+            """), unsafe_allow_html=True)
 
     # ── Fact-Check Tips ────────────────────────────────────────────────────────
     with st.expander("💡 5 Fact-Check Tips You Can Apply Right Now", expanded=False):
@@ -3000,7 +3000,7 @@ def render_claude_panel(result: dict) -> None:
     st.caption("Claude reads the article and provides expert media-literacy insights.")
 
     if not _claude_available():
-        st.markdown("""
+        st.markdown(clean_html("""
         <div class="claude-card" style="border-left-color:#FFB800;">
             <div style="color:#FFB800; font-weight:600; margin-bottom:6px;">&#9888;&#65039; Claude AI not configured</div>
             <div style="color:#8892A4; font-size:0.85rem; line-height:1.6;">
@@ -3010,7 +3010,7 @@ def render_claude_panel(result: dict) -> None:
                 3. Install: <code>pip install anthropic python-dotenv</code>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
         return
 
     tab_brief, tab_ask = st.tabs(["&#129300; AI Credibility Brief", "&#128172; Ask Claude"])

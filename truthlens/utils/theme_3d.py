@@ -10,6 +10,7 @@ import numpy as np
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple, Optional
 import random
+import textwrap
 
 
 class ParticleSystem:
@@ -117,7 +118,7 @@ class Theme3D:
     @staticmethod
     def get_aurora_background() -> str:
         """Generate CSS for animated aurora background effect."""
-        return """
+        return textwrap.dedent("""
         <style>
         .aurora-bg {
             position: fixed;
@@ -190,7 +191,7 @@ class Theme3D:
             <div class="aurora-blob aurora-blob-2"></div>
             <div class="aurora-blob aurora-blob-3"></div>
         </div>
-        """
+        """).strip()
     
     @staticmethod
     def get_particle_overlay() -> str:
@@ -198,23 +199,23 @@ class Theme3D:
         particle_system = ParticleSystem(particle_count=30)
         css = particle_system.get_css_animations()
         
-        html = f"""
+        html = textwrap.dedent(f"""
         <style>
         {css}
         </style>
         <div class="particle-overlay">
-        """
+        """).strip()
         
         for p in particle_system.particles[:20]:
-            html += f'<div class="particle-{p["id"]}\"></div>\n'
+            html += f'\n<div class="particle-{p["id"]}"></div>'
         
-        html += "</div>"
+        html += "\n</div>"
         return html
     
     @staticmethod
     def get_glowing_grid() -> str:
         """Generate CSS for animated glowing grid background."""
-        return """
+        return textwrap.dedent("""
         <style>
         .glow-grid {
             position: fixed;
@@ -238,7 +239,7 @@ class Theme3D:
         }
         </style>
         <div class="glow-grid"></div>
-        """
+        """).strip()
 
 
 def create_3d_globe_visualization(location_data: dict = None) -> go.Figure:
