@@ -1459,7 +1459,7 @@ def _render_mini_trend(scores: list) -> None:
         xaxis=dict(visible=False), yaxis=dict(visible=False, range=[0, 100]),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, config={"displayModeBar": False})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1562,7 +1562,7 @@ def render_input_panel() -> Tuple[str, str, str]:
                     with st.expander(f"Image {idx}: {file_name}", expanded=expanded):
                         col_img, col_ocr = st.columns([1, 1])
                         with col_img:
-                            st.image(image, caption=file_name, use_container_width=True)
+                            st.image(image, caption=file_name, width='stretch')
                         with col_ocr:
                             if text:
                                 st.success(f"Extracted {len(text.split())} words.")
@@ -2076,7 +2076,7 @@ def render_truth_score_gauge(truth_score: float, verdict: str, verdict_color: st
         # 3D rotating sphere gauge with animation
         fig = create_3d_truth_score_sphere(truth_score, verdict, speed_multiplier=speed_mult)
         st.markdown('<div class="chart-3d float-3d">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         # Original 2D gauge
@@ -2135,7 +2135,7 @@ def render_truth_score_gauge(truth_score: float, verdict: str, verdict_color: st
             font={"family": "Inter"},
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
 
     # Verdict Badge with animated class based on verdict type
     if truth_score < 30:
@@ -2173,7 +2173,7 @@ def render_algorithm_comparison(model_predictions: dict) -> None:
     if use_3d:
         fig = create_3d_algorithm_comparison(model_predictions, speed_multiplier=speed_mult)
         st.markdown('<div class="chart-3d">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         display_names = {
@@ -2236,7 +2236,7 @@ def render_algorithm_comparison(model_predictions: dict) -> None:
             showlegend=False,
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
 
 
 def render_radar_chart(radar_scores: dict) -> None:
@@ -2306,7 +2306,7 @@ def render_radar_chart(radar_scores: dict) -> None:
         margin=dict(l=60, r=60, t=60, b=40),
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, config={"displayModeBar": False})
 
 
 def render_credibility_breakdown(breakdown: dict) -> None:
@@ -2407,7 +2407,7 @@ def render_lime_explanation(lime_weights: list, text: str) -> None:
         height=350 + len(sorted_weights) * 8,
         margin=dict(l=10, r=80, t=50, b=40),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, config={"displayModeBar": False})
 
     # Color-coded sentence highlighting
     st.markdown("**🔤 Sentence-Level Highlights**")
@@ -2485,7 +2485,7 @@ def render_wordcloud(redflag_words: dict) -> None:
         ax.imshow(wc, interpolation="bilinear")
         ax.axis("off")
         fig.patch.set_alpha(0.0)
-        st.pyplot(fig, use_container_width=True)
+        st.pyplot(fig)
         plt.close()
     except Exception as e:
         # Fallback: text-based display
@@ -2520,7 +2520,7 @@ def render_cluster_explorer(cluster_data: dict, new_point: dict) -> None:
     if use_3d:
         fig = create_3d_cluster_explorer(cluster_data, new_point, speed_multiplier=speed_mult)
         st.markdown('<div class="chart-3d">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         df_cluster = pd.DataFrame({
@@ -2576,7 +2576,7 @@ def render_cluster_explorer(cluster_data: dict, new_point: dict) -> None:
             margin=dict(l=40, r=20, t=50, b=40),
         )
 
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, config={"displayModeBar": False})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2735,7 +2735,18 @@ def generate_pdf_report(result: dict) -> bytes:
         pdf = TruthLensPDF()
         pdf.add_page()
 
-        clean_txt = lambda s: s.encode("latin-1", errors="ignore").decode("latin-1")
+        # Enhanced text cleaning for PDF compatibility
+        def clean_txt(s):
+            if not isinstance(s, str):
+                s = str(s)
+            # Replace Unicode em-dash, en-dash with regular hyphen
+            s = s.replace('—', '-').replace('–', '-')
+            # Replace other common Unicode characters
+            s = s.replace('"', '"').replace('"', '"')
+            s = s.replace(''', "'").replace(''', "'")
+            s = s.replace('•', '*').replace('…', '...')
+            # Encode to latin-1, ignoring any remaining unsupported characters
+            return s.encode("latin-1", errors="ignore").decode("latin-1")
 
         # Title
         pdf.set_font("Helvetica", "B", 14)
@@ -3069,7 +3080,7 @@ def render_claude_panel(result: dict) -> None:
         q_cols = st.columns(2)
         for idx, qtext in enumerate(quick_qs):
             with q_cols[idx % 2]:
-                if st.button(qtext, key=f"quick_q_{idx}", use_container_width=True):
+                if st.button(qtext, key=f"quick_q_{idx}"):
                     st.session_state["claude_question_input"] = qtext
 
         question = st.text_input(
@@ -3523,7 +3534,7 @@ def main() -> None:
     with col_btn:
         analyze_clicked = st.button(
             "🔍 Analyze Article",
-            use_container_width=True,
+
             help="Run all local analysis models on the article",
             disabled=st.session_state.get("analysis_in_progress", False),
         )
@@ -3640,10 +3651,10 @@ def _render_welcome() -> None:
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📰 Sample: Likely REAL Article", use_container_width=True, key="btn_sample_real"):
+        if st.button("📰 Sample: Likely REAL Article", key="btn_sample_real"):
             st.session_state["_sample_type"] = "real"
     with col2:
-        if st.button("🚨 Sample: Likely FAKE Article", use_container_width=True, key="btn_sample_fake"):
+        if st.button("🚨 Sample: Likely FAKE Article", key="btn_sample_fake"):
             st.session_state["_sample_type"] = "fake"
 
     # ── Annotated sample article display ──────────────────────────────────────
