@@ -3402,30 +3402,29 @@ def main() -> None:
     # ── LUEIO-Style Hero Banner ────────────────────────────────────────────────
     st.markdown(clean_html("""
     <div class="hero-section" style="text-align:left; padding:64px 0 32px 0; position:relative; z-index:2;">
-
-        <h1 class="lueio-title">
-            Detecting Misinformation<br>
-            with <span class="grad">AI Precision</span>
-        </h1>
-        <p class="lueio-subtitle">
-            TruthLens analyzes articles using <b style="color:#C084FC;">9 ML models</b> +
-            <b style="color:#06B6D4;">Claude AI</b> to deliver an explainable credibility
-            verdict in seconds — built for <b style="color:#F1F0FF;">students, educators &amp;
-            fact-checkers</b>.
-        </p>
-        <p style="font-family:'Space Grotesk',sans-serif; font-size:0.78rem;
-                  color:rgba(139,138,168,0.7); letter-spacing:0.15em; text-transform:uppercase;
-                  margin-bottom:20px;">
-            Media Literacy · Fact-Checking · Misinformation Detection
-        </p>
-        <div class="hscan"></div>
-        <div style="display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap;">
-            <span class="hpill fa1">🤖 AI Detection</span>
-            <span class="hpill fa2">🛡️ Source Verification</span>
-            <span class="hpill fa3">🔀 Explainable AI</span>
-            <span class="hpill fa4">🎥 Deepfake Detection</span>
-            <span class="hpill fa5">⚡ Real-Time Analysis</span>
-        </div>
+    <h1 class="lueio-title">
+    Detecting Misinformation<br>
+    with <span class="grad">AI Precision</span>
+    </h1>
+    <p class="lueio-subtitle">
+    TruthLens analyzes articles using <b style="color:#C084FC;">9 ML models</b> +
+    <b style="color:#06B6D4;">Claude AI</b> to deliver an explainable credibility
+    verdict in seconds — built for <b style="color:#F1F0FF;">students, educators &amp;
+    fact-checkers</b>.
+    </p>
+    <p style="font-family:'Space Grotesk',sans-serif; font-size:0.78rem;
+    color:rgba(139,138,168,0.7); letter-spacing:0.15em; text-transform:uppercase;
+    margin-bottom:20px;">
+    Media Literacy · Fact-Checking · Misinformation Detection
+    </p>
+    <div class="hscan"></div>
+    <div style="display:flex; justify-content:flex-start; gap:10px; flex-wrap:wrap;">
+    <span class="hpill fa1">🤖 AI Detection</span>
+    <span class="hpill fa2">🛡️ Source Verification</span>
+    <span class="hpill fa3">🔀 Explainable AI</span>
+    <span class="hpill fa4">🎥 Deepfake Detection</span>
+    <span class="hpill fa5">⚡ Real-Time Analysis</span>
+    </div>
     </div>
     <hr>
     """), unsafe_allow_html=True)
