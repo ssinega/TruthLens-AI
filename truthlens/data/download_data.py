@@ -233,8 +233,8 @@ def download_liar() -> pd.DataFrame:
     """
     try:
         from datasets import load_dataset as hf_load  # type: ignore
-        logger.info("Downloading LIAR dataset from HuggingFace...")
-        dataset = hf_load("liar", trust_remote_code=True)
+        logger.info("Downloading LIAR dataset from HuggingFace (UKPLab/liar)...")
+        dataset = hf_load("UKPLab/liar")
 
         frames = []
         for split_name in ["train", "validation", "test"]:
@@ -242,37 +242,54 @@ def download_liar() -> pd.DataFrame:
                 frames.append(dataset[split_name].to_pandas())
         df = pd.concat(frames, ignore_index=True)
 
-        # LIAR columns: statement, label (string), speaker, subject, etc.
-        if "statement" in df.columns:
+        if "text" not in df.columns and "statement" in df.columns:
             df["text"] = df["statement"].astype(str)
-        elif "text" not in df.columns:
-            raise ValueError("No 'statement' or 'text' column in LIAR dataset.")
-
         if "title" not in df.columns:
-            df["title"] = df.get("subject", pd.Series([""] * len(df))).astype(str)
+            df["title"] = df.get("context", pd.Series([""] * len(df))).astype(str)
 
-        # Map string labels (LIAR uses integer indices for the 6 classes)
-        # HuggingFace liar dataset: label is int 0-5
-        # 0=false, 1=half-true, 2=mostly-true, 3=true, 4=barely-true, 5=pants-fire
-        liar_int_map = {
-            0: 0,  # false      → Fake
-            1: 1,  # half-true  → Suspicious
-            2: 2,  # mostly-true→ Real
-            3: 2,  # true       → Real
-            4: 1,  # barely-true→ Suspicious
-            5: 0,  # pants-fire → Fake
-        }
-        if "label" in df.columns:
+        if "label_text" in df.columns:
+            df["label"] = df["label_text"].astype(str).str.lower().map({
+                "false statement": 0,
+                "true statement": 2,
+            })
+        elif "labels" in df.columns:
+            # UKPLab/liar uses 0=true, 1=false
+            df["label"] = df["labels"].map({0: 2, 1: 0})
+        elif "label" in df.columns:
             if df["label"].dtype == object:
-                df["label"] = df["label"].str.lower().str.replace("-", "-").map(_LIAR_LABEL_MAP)
+                df["label"] = df["label"].str.lower().map(_LIAR_LABEL_MAP)
             else:
+                liar_int_map = {
+                    0: 0, 1: 1, 2: 2, 3: 2, 4: 1, 5: 0,
+                }
                 df["label"] = df["label"].map(liar_int_map)
-            df["label"] = df["label"].fillna(1).astype(int)
 
+        df["label"] = df["label"].fillna(1).astype(int)
         df = df[["text", "title", "label"]].dropna(subset=["text"])
         df["text"] = df["text"].astype(str).str.strip()
         df = df[df["text"].str.len() > 5].reset_index(drop=True)
         logger.info(f"LIAR downloaded: {len(df):,} records.")
+        return df
+
+    except Exception as exc:
+        logger.warning(f"HuggingFace LIAR failed ({exc}). Trying GitHub TSV mirror...")
+
+    try:
+        base_url = "https://raw.githubusercontent.com/tfs4/liar_dataset/master"
+        frames = []
+        for split_name in ["train", "valid", "test"]:
+            url = f"{base_url}/{split_name}.tsv"
+            df_split = pd.read_csv(url, sep="\t", header=None)
+            frames.append(df_split)
+
+        df = pd.concat(frames, ignore_index=True)
+        df["text"] = df[2].astype(str)
+        df["title"] = df[3].fillna("").astype(str)
+        df["label"] = df[1].astype(str).str.lower().map(_LIAR_LABEL_MAP).fillna(1).astype(int)
+        df = df[["text", "title", "label"]].dropna(subset=["text"])
+        df["text"] = df["text"].astype(str).str.strip()
+        df = df[df["text"].str.len() > 5].reset_index(drop=True)
+        logger.info(f"LIAR (GitHub mirror) downloaded: {len(df):,} records.")
         return df
 
     except Exception as exc:
@@ -418,6 +435,12 @@ DATASETS = {
         "display":  "LIAR Benchmark",
         "expected": 12836,
     },
+    "all": {
+        "fn":       None,
+        "out":      DATA_DIR / "all_datasets_combined.csv",
+        "display":  "All Supported Datasets",
+        "expected": 72134 + 44898 + 12836,
+    },
 }
 
 
@@ -438,8 +461,21 @@ if __name__ == "__main__":
     info = DATASETS[args.dataset]
     logger.info(f"=== TruthLens Dataset Downloader — {info['display']} ===")
 
-    df = info["fn"]()
-    save_dataset(df, info["out"])
+    if args.dataset == "all":
+        frames = []
+        for dataset_key in ["welfake", "isot", "liar"]:
+            dataset_info = DATASETS[dataset_key]
+            logger.info(f"Downloading {dataset_info['display']}...")
+            df_part = dataset_info["fn"]()
+            save_dataset(df_part, dataset_info["out"])
+            frames.append(df_part.assign(source_dataset=dataset_key))
+
+        df = pd.concat(frames, ignore_index=True)
+        df = df.drop_duplicates(subset=["text"]).reset_index(drop=True)
+        save_dataset(df, info["out"])
+    else:
+        df = info["fn"]()
+        save_dataset(df, info["out"])
 
     logger.info(f"Label distribution: {df['label'].value_counts().to_dict()}")
     logger.info(

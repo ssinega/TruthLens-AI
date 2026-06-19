@@ -65,6 +65,7 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # ── Project root on sys.path ───────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent
+PROFILE_PATH = ROOT / "data" / "user_profile.json"
 sys.path.insert(0, str(ROOT))
 
 # ── 3D Visualization Components ────────────────────────────────────────────────
@@ -1210,11 +1211,12 @@ def inject_css() -> None:
 
 def init_session_state() -> None:
     """Initialize all session state variables with defaults."""
+    profile = load_profile()
     defaults = {
-        "analysis_history": [],          # List of past analysis results
+        "analysis_history": profile.get("analysis_history", []),  # Past analysis summaries
         "current_result": None,          # Latest analysis result
-        "truth_hunter_points": 0,        # Gamification points
-        "analyses_count": 0,             # Total analyses this session
+        "truth_hunter_points": profile.get("truth_hunter_points", 0),  # Gamification points
+        "analyses_count": profile.get("analyses_count", 0),            # Total analyses
         "analysis_in_progress": False,   # True only while a request is running
         "checklist_state": [False] * 7,  # Credibility checklist
         "pipeline": None,               # Lazy-loaded PredictionPipeline
@@ -1227,6 +1229,57 @@ def init_session_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = value
     st.session_state.pop("demo_mode", None)
+
+
+def load_profile() -> Dict[str, Any]:
+    """Load persisted sidebar progress so analysis reruns do not crash or reset state."""
+    default_profile = {
+        "truth_hunter_points": 0,
+        "analyses_count": 0,
+        "analysis_history": [],
+    }
+    if not PROFILE_PATH.exists():
+        return default_profile
+
+    try:
+        with open(PROFILE_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return {
+            "truth_hunter_points": int(raw.get("truth_hunter_points", 0)),
+            "analyses_count": int(raw.get("analyses_count", 0)),
+            "analysis_history": raw.get("analysis_history", [])[:20],
+        }
+    except Exception as e:
+        logger.warning(f"Could not load saved profile: {e}")
+        return default_profile
+
+
+def save_profile(points: int, analyses_count: int, analysis_history: List[Dict[str, Any]]) -> None:
+    """Persist a lightweight user progress snapshot for sidebar gamification."""
+    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    sanitized_history = []
+    for item in analysis_history[-20:]:
+        if not isinstance(item, dict):
+            continue
+        sanitized_history.append({
+            "title": str(item.get("title", ""))[:160],
+            "verdict": str(item.get("verdict", ""))[:80],
+            "truth_score": float(item.get("truth_score", 0)),
+            "timestamp": str(item.get("timestamp", ""))[:40],
+        })
+
+    payload = {
+        "truth_hunter_points": int(points),
+        "analyses_count": int(analyses_count),
+        "analysis_history": sanitized_history,
+    }
+
+    try:
+        with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not save profile: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3158,7 +3211,7 @@ def render_dashboard(result: dict) -> None:
     """), unsafe_allow_html=True)
 
     # ── Row 1: Gauge + Key Metrics ─────────────────────────────────────────────
-    col_gauge, col_metrics = st.columns([1, 2])
+    col_gauge, col_metrics = st.columns([1.05, 1.35], gap="large")
 
     with col_gauge:
         render_truth_score_gauge(
@@ -3173,7 +3226,7 @@ def render_dashboard(result: dict) -> None:
 
     with col_metrics:
         st.markdown("<br>", unsafe_allow_html=True)
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3 = st.columns(3, gap="small")
         with m1:
             st.metric(
                 "Confidence",
@@ -3197,7 +3250,7 @@ def render_dashboard(result: dict) -> None:
                 help="Isolation Forest: how unusual are the writing patterns?"
             )
 
-        m4, m5, m6 = st.columns(3)
+        m4, m5, m6 = st.columns(3, gap="small")
         with m4:
             st.metric("Word Count", result.get("word_count", 0))
         with m5:
@@ -3209,15 +3262,19 @@ def render_dashboard(result: dict) -> None:
 
         # Red flags
         st.markdown("**🚩 Key Findings:**")
-        for flag in result.get("red_flags", [])[:2]:
-            st.markdown(
-                f"<div class='red-flag'>{flag}</div>",
-                unsafe_allow_html=True
-            )
+        key_findings = result.get("red_flags", [])[:3]
+        if key_findings:
+            for flag in key_findings:
+                st.markdown(
+                    f"<div class='red-flag'>{flag}</div>",
+                    unsafe_allow_html=True
+                )
+        else:
+            st.info("No major red flags were detected for this article.")
 
     # ── Row 2: Algorithm Comparison + Radar ────────────────────────────────────
     st.markdown("---")
-    col_bar, col_radar = st.columns([1, 1])
+    col_bar, col_radar = st.columns([1, 1], gap="large")
 
     with col_bar:
         render_algorithm_comparison(result.get("model_predictions", {}))
@@ -3227,7 +3284,7 @@ def render_dashboard(result: dict) -> None:
 
     # ── Row 3: Credibility Breakdown + Word Cloud ──────────────────────────────
     st.markdown("---")
-    col_break, col_wc = st.columns([1, 1])
+    col_break, col_wc = st.columns([1, 1], gap="large")
 
     with col_break:
         st.markdown("**📊 Credibility Signal Breakdown**",
@@ -3262,26 +3319,24 @@ def render_dashboard(result: dict) -> None:
     # ── Row 5b: Advanced Insights ─────────────────────────────────────────────
     st.markdown("---")
     st.markdown("**🔬 Advanced Linguistic Insights**")
-    adv_col1, adv_col2, adv_col3 = st.columns(3)
+    adv_col1, adv_col2, adv_col3 = st.columns(3, gap="large")
 
     with adv_col1:
-        st.markdown("""
-        <div class="neo-card" style="padding:18px;">
-            <div style="font-family:'Space Grotesk'; font-weight:700; color:#00F0FF;
-                        font-size:0.88rem; margin-bottom:10px;">📚 Reading Level</div>
-        """, unsafe_allow_html=True)
         flesch = result.get("flesch_score", 50)
         reading_level = result.get("reading_level", "Standard")
         color = "#FF4444" if flesch < 40 else "#FFB800" if flesch < 65 else "#00C851"
-        st.markdown(f"""
+        st.markdown(clean_html(f"""
+        <div class="neo-card" style="padding:18px; height:100%;">
+            <div style="font-family:'Space Grotesk'; font-weight:700; color:#00F0FF;
+                        font-size:0.88rem; margin-bottom:10px;">📚 Reading Level</div>
             <div style="font-family:'Orbitron'; font-size:1.8rem; font-weight:700;
                         color:{color}; text-align:center;">{flesch:.0f}</div>
             <div style="text-align:center; color:#8892A4; font-size:0.78rem;">{reading_level}</div>
             <div style="font-size:0.72rem; color:#8892A4; margin-top:8px;">
-            Fake news is often written at a lower reading level to maximize emotional impact and shareability.
+                Fake news is often written at a lower reading level to maximize emotional impact and shareability.
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
     with adv_col2:
         emotional_score = result.get("emotional_score", 0)
@@ -3289,8 +3344,8 @@ def render_dashboard(result: dict) -> None:
         anger = result.get("anger_score", 0)
         disgust = result.get("disgust_score", 0)
         em_color = "#FF4444" if emotional_score > 60 else "#FFB800" if emotional_score > 30 else "#00C851"
-        st.markdown(f"""
-        <div class="neo-card" style="padding:18px;">
+        st.markdown(clean_html(f"""
+        <div class="neo-card" style="padding:18px; height:100%;">
             <div style="font-family:'Space Grotesk'; font-weight:700; color:#FF6B6B;
                         font-size:0.88rem; margin-bottom:10px;">😡 Emotional Manipulation</div>
             <div style="font-family:'Orbitron'; font-size:1.8rem; font-weight:700;
@@ -3304,13 +3359,10 @@ def render_dashboard(result: dict) -> None:
             High emotional triggers (fear, anger) are classic signs of manipulative content designed to bypass critical thinking.
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
+
+    with adv_col3:
         entities = result.get("named_entities", [])
-        st.markdown("""
-        <div class="neo-card" style="padding:18px;">
-            <div style="font-family:'Space Grotesk'; font-weight:700; color:#9B30FF;
-                        font-size:0.88rem; margin-bottom:10px;">🏷️ Named Entities</div>
-        """, unsafe_allow_html=True)
         if entities:
             entity_html = " ".join(
                 f'<span style="display:inline-block; background:rgba(155,48,255,0.12); '
@@ -3319,13 +3371,27 @@ def render_dashboard(result: dict) -> None:
                 for e in entities[:10]
             )
             st.markdown(
-                f'{entity_html}<div style="font-size:0.72rem; color:#8892A4; margin-top:8px;">'
-                f'People, organizations, and places mentioned. Verify these exist and are quoted accurately.</div>'
-                f'</div>', unsafe_allow_html=True
+                clean_html(f"""
+                <div class="neo-card" style="padding:18px; height:100%;">
+                    <div style="font-family:'Space Grotesk'; font-weight:700; color:#9B30FF;
+                                font-size:0.88rem; margin-bottom:10px;">🏷️ Named Entities</div>
+                    <div style="min-height:74px;">{entity_html}</div>
+                    <div style="font-size:0.72rem; color:#8892A4; margin-top:8px;">
+                        People, organizations, and places mentioned. Verify these exist and are quoted accurately.
+                    </div>
+                </div>
+                """),
+                unsafe_allow_html=True
             )
         else:
             st.markdown(
-                '<div style="color:#8892A4; font-size:0.82rem;">No named entities detected.</div></div>',
+                clean_html("""
+                <div class="neo-card" style="padding:18px; height:100%;">
+                    <div style="font-family:'Space Grotesk'; font-weight:700; color:#9B30FF;
+                                font-size:0.88rem; margin-bottom:10px;">🏷️ Named Entities</div>
+                    <div style="color:#8892A4; font-size:0.82rem;">No named entities detected.</div>
+                </div>
+                """),
                 unsafe_allow_html=True
             )
 

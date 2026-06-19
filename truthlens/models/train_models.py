@@ -38,6 +38,7 @@ from sklearn.linear_model import LogisticRegression, PassiveAggressiveClassifier
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import SGDClassifier
 from sklearn.svm import LinearSVC
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ DATASET_REGISTRY = {
         "csv":      ROOT / "data" / "liar_dataset.csv",
         "display":  "LIAR Benchmark",
     },
+    "all": {
+        "csv":      ROOT / "data" / "all_datasets_combined.csv",
+        "display":  "All Supported Datasets (Combined)",
+    },
 }
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -74,15 +79,16 @@ sys.path.insert(0, str(ROOT))
 
 from utils.feature_extractor import FeatureExtractor
 from utils.text_preprocessor import TextPreprocessor
-from data.download_data import load_dataset_csv, generate_synthetic_dataset, save_dataset
+from data.download_data import DATASETS, load_dataset_csv, generate_synthetic_dataset, save_dataset
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 RANDOM_STATE = 42
 TEST_SIZE = 0.20
-MAX_TFIDF_FEATURES = 10_000
+MAX_TFIDF_FEATURES = 5_000
 CLUSTER_N = 4           # K-Means clusters for topic map
-CLUSTER_SAMPLE = 500    # Articles to use for the cluster map
+CLUSTER_SAMPLE = 400    # Articles to use for the cluster map
+MAX_TRAINING_ROWS = 45_000
 
 
 def load_or_generate_data(dataset_name: str = "welfake") -> pd.DataFrame:
@@ -101,17 +107,30 @@ def load_or_generate_data(dataset_name: str = "welfake") -> pd.DataFrame:
     info = DATASET_REGISTRY.get(dataset_name, DATASET_REGISTRY["welfake"])
     data_path = info["csv"]
 
-    if data_path.exists():
+    if dataset_name == "all":
+        frames = []
+        for dataset_key in ["welfake", "isot", "liar"]:
+            part_df = load_or_generate_data(dataset_key)
+            part_df["source_dataset"] = dataset_key
+            frames.append(part_df)
+
+        df = pd.concat(frames, ignore_index=True)
+        df = df.drop_duplicates(subset=["text"]).reset_index(drop=True)
+        save_dataset(df, data_path)
+        logger.info(f"Combined dataset prepared at {data_path}")
+    elif data_path.exists():
         logger.info(f"Loading dataset from {data_path}...")
         df = pd.read_csv(data_path).dropna(subset=["text"])
     else:
-        logger.warning(
-            f"Dataset CSV not found at {data_path}. "
-            f"Run: python data/download_data.py --dataset {dataset_name}"
-        )
-        logger.warning("Falling back to synthetic data (2 000 samples)...")
-        df = generate_synthetic_dataset(n_samples=2000)
-        save_dataset(df, data_path)
+        logger.warning(f"Dataset CSV not found at {data_path}. Attempting fresh download...")
+        try:
+            dataset_info = DATASETS[dataset_name]
+            df = dataset_info["fn"]()
+            save_dataset(df, data_path)
+        except Exception as e:
+            logger.warning(f"Dataset download failed ({e}). Falling back to synthetic data (2 000 samples)...")
+            df = generate_synthetic_dataset(n_samples=2000)
+            save_dataset(df, data_path)
 
     # Binary labels for models that need 2-class output
     # Map: 0=Fake, 1=Suspicious, 2=Real → binary: 0=Fake, 1=Real
@@ -140,6 +159,29 @@ def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["cleaned_text"].str.len() > 5].reset_index(drop=True)
     logger.info(f"After preprocessing: {len(df)} valid records.")
     return df
+
+
+def downsample_for_training(df: pd.DataFrame, max_rows: int = MAX_TRAINING_ROWS) -> pd.DataFrame:
+    """Keep training within sandbox memory limits while preserving dataset/label balance."""
+    if len(df) <= max_rows:
+        return df
+
+    strata = df["label_binary"].astype(str)
+    if "source_dataset" in df.columns:
+        strata = df["source_dataset"].astype(str) + "::" + strata
+
+    sample_idx, _ = train_test_split(
+        np.arange(len(df)),
+        train_size=max_rows,
+        random_state=RANDOM_STATE,
+        stratify=strata,
+    )
+    sampled = df.iloc[sample_idx].reset_index(drop=True)
+    logger.info(
+        f"Downsampled training set from {len(df):,} to {len(sampled):,} rows "
+        f"to keep combined training stable in the current environment."
+    )
+    return sampled
 
 
 def train_supervised_models(
@@ -184,7 +226,7 @@ def train_supervised_models(
     try:
         # RF needs dense matrix for some configs; use sparse-compatible params
         rf = RandomForestClassifier(
-            n_estimators=100, max_depth=20, class_weight="balanced",
+            n_estimators=80, max_depth=16, class_weight="balanced",
             n_jobs=-1, random_state=RANDOM_STATE
         )
         rf.fit(X_train, y_train)
@@ -204,9 +246,9 @@ def train_supervised_models(
     # ── 3. Passive Aggressive ─────────────────────────────────────────────────
     logger.info("[3/5] Training Passive Aggressive Classifier...")
     t0 = time.time()
-    pac = PassiveAggressiveClassifier(
-        C=1.0, max_iter=1000, tol=1e-3,
-        class_weight="balanced", random_state=RANDOM_STATE
+    pac = SGDClassifier(
+        loss="hinge", penalty=None, learning_rate="pa1", eta0=1.0,
+        max_iter=1000, tol=1e-3, class_weight="balanced", random_state=RANDOM_STATE
     )
     pac.fit(X_train, y_train)
     preds = pac.predict(X_test)
@@ -246,8 +288,11 @@ def train_supervised_models(
 
         # Calibrate PAC for probability outputs
         pac_cal = CalibratedClassifierCV(
-            PassiveAggressiveClassifier(C=1.0, max_iter=1000, class_weight="balanced",
-                                        random_state=RANDOM_STATE),
+            SGDClassifier(
+                loss="hinge", penalty=None, learning_rate="pa1", eta0=1.0,
+                max_iter=1000, tol=1e-3, class_weight="balanced",
+                random_state=RANDOM_STATE
+            ),
             cv=3
         )
         svc_cal = CalibratedClassifierCV(
@@ -260,6 +305,7 @@ def train_supervised_models(
                 ("lr",  LogisticRegression(C=1.0, solver="liblinear", max_iter=1000,
                                            class_weight="balanced", random_state=RANDOM_STATE)),
                 ("rf",  RandomForestClassifier(n_estimators=50, max_depth=15,
+                                               min_samples_leaf=2,
                                                class_weight="balanced", n_jobs=-1,
                                                random_state=RANDOM_STATE)),
                 ("pac", pac_cal),
@@ -469,6 +515,7 @@ def run_training_pipeline(dataset_name: str = "welfake") -> None:
 
     # ── Step 2: Preprocess ─────────────────────────────────────────────────────
     df = preprocess_data(df)
+    df = downsample_for_training(df)
 
     # ── Step 3: TF-IDF Feature Extraction ─────────────────────────────────────
     logger.info("Fitting TF-IDF Vectorizer...")
