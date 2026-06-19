@@ -99,9 +99,27 @@ def clean_html(html_str: str) -> str:
     import textwrap
     return textwrap.dedent(html_str).strip()
 
-def inject_css() -> None:
-    """Inject LUEIO-inspired dark agency CSS — all inline, no external file needed."""
+def inject_enhanced_3d_effects() -> None:
+    """Inject enhanced 3D animations and visual effects without affecting model functionality."""
+    
+    # Import theme system
+    from utils.theme_3d import Theme3D
+    
+    # Get all visual effects
+    aurora_html = Theme3D.get_aurora_background()
+    particle_html = Theme3D.get_particle_overlay()
+    grid_html = Theme3D.get_glowing_grid()
+    
+    # Combine all effects
+    st.markdown(aurora_html + particle_html + grid_html, unsafe_allow_html=True)
 
+
+def inject_css() -> None:
+    """Inject LUEIO-inspired dark agency CSS with enhanced 3D effects — all inline, no external file needed."""
+    
+    # Inject enhanced 3D effects first
+    inject_enhanced_3d_effects()
+    
     st.markdown(clean_html("""
     <style>
 

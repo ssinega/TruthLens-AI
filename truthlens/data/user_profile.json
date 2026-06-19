@@ -1,0 +1,12 @@
+{
+  "truth_hunter_points": 10,
+  "analyses_count": 1,
+  "analysis_history": [
+    {
+      "title": "",
+      "verdict": "\ud83d\udfe1 SUSPICIOUS",
+      "truth_score": 42.2,
+      "timestamp": "06:15:21"
+    }
+  ]
+}
