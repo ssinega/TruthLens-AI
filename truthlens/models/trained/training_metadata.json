@@ -1,37 +1,37 @@
 {
-  "trained_at": "2026-06-19T05:27:26Z",
-  "dataset_name": "All Supported Datasets (Combined)",
-  "dataset_key": "all",
-  "dataset_size": 75505,
+  "trained_at": "2026-06-19T05:51:25Z",
+  "dataset_name": "WELFake",
+  "dataset_key": "welfake",
+  "dataset_size": 71308,
   "models": {
     "logistic_regression": {
-      "accuracy": 0.9059,
-      "f1": 0.9058,
-      "fit_time_s": 1.28,
+      "accuracy": 0.9476,
+      "f1": 0.9476,
+      "fit_time_s": 1.29,
       "saved_at": "/workspace/truthlens/models/trained/logistic_regression.pkl"
     },
     "random_forest": {
-      "accuracy": 0.8774,
-      "f1": 0.8773,
-      "fit_time_s": 7.84,
+      "accuracy": 0.9213,
+      "f1": 0.9213,
+      "fit_time_s": 9.75,
       "saved_at": "/workspace/truthlens/models/trained/random_forest.pkl"
     },
     "passive_aggressive": {
-      "accuracy": 0.8787,
-      "f1": 0.8787,
-      "fit_time_s": 0.62,
+      "accuracy": 0.9367,
+      "f1": 0.9367,
+      "fit_time_s": 0.74,
       "saved_at": "/workspace/truthlens/models/trained/passive_aggressive.pkl"
     },
     "linear_svc": {
-      "accuracy": 0.9036,
-      "f1": 0.9035,
-      "fit_time_s": 0.94,
+      "accuracy": 0.9524,
+      "f1": 0.9524,
+      "fit_time_s": 0.88,
       "saved_at": "/workspace/truthlens/models/trained/linear_svc.pkl"
     },
     "voting_ensemble": {
-      "accuracy": 0.9059,
-      "f1": 0.9058,
-      "fit_time_s": 8.71,
+      "accuracy": 0.9527,
+      "f1": 0.9527,
+      "fit_time_s": 9.79,
       "saved_at": "/workspace/truthlens/models/trained/voting_ensemble.pkl"
     }
   },
