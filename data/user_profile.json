@@ -1,6 +1,6 @@
 {
-  "truth_hunter_points": 20,
-  "analyses_count": 2,
+  "truth_hunter_points": 60,
+  "analyses_count": 6,
   "analysis_history": [
     {
       "title": "",
@@ -13,6 +13,30 @@
       "verdict": "\ud83d\udfe1 SUSPICIOUS",
       "truth_score": 44.9,
       "timestamp": "11:58:58"
+    },
+    {
+      "title": "",
+      "verdict": "\ud83d\udfe1 SUSPICIOUS",
+      "truth_score": 44.9,
+      "timestamp": "12:39:52"
+    },
+    {
+      "title": "",
+      "verdict": "\ud83d\udfe1 SUSPICIOUS",
+      "truth_score": 45.5,
+      "timestamp": "12:40:43"
+    },
+    {
+      "title": "",
+      "verdict": "\ud83d\udfe1 SUSPICIOUS",
+      "truth_score": 44.5,
+      "timestamp": "12:44:02"
+    },
+    {
+      "title": "",
+      "verdict": "\ud83d\udfe1 SUSPICIOUS",
+      "truth_score": 44.5,
+      "timestamp": "12:58:55"
     }
   ]
 }

@@ -38,9 +38,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 # ── Load .env for local development ───────────────────────────────────────────
+_ROOT_FOR_ENV = Path(__file__).resolve().parent
+_HAS_DOTENV = False
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    _HAS_DOTENV = True
+    load_dotenv(_ROOT_FOR_ENV / ".env")
 except ImportError:
     pass  # python-dotenv not installed; rely on os.environ
 
@@ -51,20 +54,56 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
-# ── Claude AI (Anthropic) ──────────────────────────────────────────────────────
+# ── AI (Google Gemini) ───────────────────────────────────────────────────────
 try:
-    import anthropic as _anthropic_lib
-    HAS_ANTHROPIC = True
+    import google.generativeai as _genai_lib
+    HAS_GENAI = True
 except ImportError:
-    HAS_ANTHROPIC = False
-    _anthropic_lib = None
+    HAS_GENAI = False
+    _genai_lib = None
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+AI_API_KEY = os.environ.get("AI_API_KEY", "")
 
 # ── Project root on sys.path ───────────────────────────────────────────────────
-ROOT = Path(__file__).resolve().parent
+ROOT = _ROOT_FOR_ENV
+
+# #region agent log
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str, run_id: str = "pre-fix") -> None:
+    """Append one NDJSON debug line for this session."""
+    try:
+        import json as _json
+        payload = {
+            "sessionId": "063631",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(ROOT / "debug-063631.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps(payload) + "\n")
+    except Exception:
+        pass
+
+_debug_log(
+    "app.py:startup",
+    "AI env bootstrap",
+    {
+        "has_dotenv": _HAS_DOTENV,
+        "has_genai": HAS_GENAI,
+        "env_file_exists": (_ROOT_FOR_ENV / ".env").exists(),
+        "api_key_present": bool(AI_API_KEY),
+        "api_key_len": len(AI_API_KEY),
+        "cwd": os.getcwd(),
+        "ai_available": HAS_GENAI and bool(AI_API_KEY),
+    },
+    "C1",
+)
+# #endregion
 PROFILE_PATH = ROOT / "data" / "user_profile.json"
 sys.path.insert(0, str(ROOT))
 
@@ -100,8 +139,25 @@ def clean_html(html_str: str) -> str:
     return textwrap.dedent(html_str).strip()
 
 
+def _load_asset(filename: str) -> str:
+    """Load a static asset from the assets/ folder for CSS/JS injection."""
+    path = ROOT / "assets" / filename
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return ""
+
+
 def inject_css() -> None:
-    """Inject LUEIO-inspired dark agency CSS — all inline, no external file needed."""
+    """Inject global dark theme, 3D background layers, and component styles."""
+    external_css = "\n".join(
+        block for block in (
+            _load_asset("background_3d.css"),
+            _load_asset("enhanced_ui.css"),
+        ) if block.strip()
+    )
+    if external_css.strip():
+        st.markdown(f"<style>{external_css}</style>", unsafe_allow_html=True)
+
     st.markdown(clean_html("""
     <style>
 
@@ -137,7 +193,7 @@ def inject_css() -> None:
         line-height: 1.6 !important;
     }
 
-    /* ── Fixed deep-space gradient background ── */
+    /* ── Transparent wrappers — gradient lives in .tl-bg-root ── */
     html, body,
     .stApp,
     [data-testid="stAppViewContainer"],
@@ -146,8 +202,7 @@ def inject_css() -> None:
     [data-testid="stAppViewBlockContainer"],
     .main,
     .appview-container {
-        background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%) !important;
-        background-attachment: fixed !important;
+        background: transparent !important;
         min-height: 100vh !important;
     }
 
@@ -176,92 +231,7 @@ def inject_css() -> None:
         max-width: 1380px !important;
     }
 
-    /* ── Animated mesh background ── */
-    .stApp::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background:
-            radial-gradient(ellipse 80% 50% at 20% 10%, rgba(123,92,240,0.12) 0%, transparent 60%),
-            radial-gradient(ellipse 60% 40% at 80% 80%, rgba(155,48,255,0.09) 0%, transparent 55%),
-            radial-gradient(ellipse 50% 60% at 60% 30%, rgba(6,182,212,0.05) 0%, transparent 50%);
-        pointer-events: none;
-        z-index: -3;
-        animation: meshPulse 12s ease-in-out infinite;
-    }
-    @keyframes meshPulse {
-        0%,100% { opacity: 0.7; }
-        50%      { opacity: 1.0; }
-    }
-
-    /* ── Dot grid overlay ── */
-    .stApp::after {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background-image: radial-gradient(circle, rgba(123,92,240,0.06) 1px, transparent 1px);
-        background-size: 32px 32px;
-        pointer-events: none;
-        z-index: -2;
-        animation: dotFade 10s ease-in-out infinite;
-    }
-    @keyframes dotFade {
-        0%,100% { opacity: 0.4; }
-        50%      { opacity: 0.9; }
-    }
-
-    /* ── Floating particles ── */
-    .particle-3d {
-        position: fixed;
-        background: radial-gradient(circle, rgba(123,92,240,0.8) 0%, transparent 70%);
-        border-radius: 50%;
-        pointer-events: none;
-        z-index: -1;
-        animation-name: rise;
-        animation-timing-function: linear;
-        animation-iteration-count: infinite;
-    }
-    @keyframes rise {
-        0%   { transform: translateY(100vh) scale(0.3); opacity: 0; }
-        8%   { opacity: 0.7; }
-        92%  { opacity: 0.3; }
-        100% { transform: translateY(-5vh) scale(1.6); opacity: 0; }
-    }
-
-    /* ── Grid flow lines ── */
-    .bg-grid-3d { position: fixed; inset: 0; pointer-events: none; z-index: -1; overflow: hidden; }
-    .grid-line {
-        position: absolute; top: 0; width: 1px; height: 100%;
-        background: linear-gradient(180deg,
-            transparent 0%,
-            rgba(123,92,240,0.06) 35%,
-            rgba(192,132,252,0.05) 65%,
-            transparent 100%);
-        animation-name: gflow;
-        animation-timing-function: linear;
-        animation-iteration-count: infinite;
-    }
-    @keyframes gflow {
-        0%   { transform: translateY(-100%); opacity: 0; }
-        15%  { opacity: 1; }
-        85%  { opacity: 1; }
-        100% { transform: translateY(100vh); opacity: 0; }
-    }
-
-    /* ── Glow orbs ── */
-    .aurora-orb {
-        position: fixed;
-        border-radius: 50%;
-        pointer-events: none;
-        z-index: -4;
-        filter: blur(100px);
-        animation: orbFloat ease-in-out infinite;
-    }
-    @keyframes orbFloat {
-        0%,100% { transform: translate(0,0); opacity: 0.10; }
-        33%      { transform: translate(24px,-20px); opacity: 0.16; }
-        66%      { transform: translate(-20px,24px); opacity: 0.08; }
-    }
+    /* ── Background layers handled by .tl-bg-root (background_3d.css) ── */
 
     /* ════════════════════════════════════
        HERO TYPOGRAPHY
@@ -380,17 +350,30 @@ def inject_css() -> None:
     @keyframes pf { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-7px);} }
 
     /* ════════════════════════════════════
-       SIDEBAR
+       SIDEBAR — glass panel, high contrast (details in background_3d.css)
     ════════════════════════════════════ */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a1035 0%, #0f0c29 100%) !important;
+    section[data-testid="stSidebar"],
+    [data-testid="stSidebar"] {
+        background: transparent !important;
+        border-right: none !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        overflow-y: auto !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    [data-testid="stSidebarUserContent"] {
+        min-height: auto !important;
+        overflow: visible !important;
     }
     section[data-testid="stSidebar"] > div,
-    [data-testid="stSidebarContent"] {
+    [data-testid="stSidebarContent"],
+    [data-testid="stSidebarUserContent"],
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"],
+    [data-testid="stSidebar"] .stVerticalBlock {
         background: transparent !important;
-        backdrop-filter: blur(28px) saturate(180%) !important;
-        -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-        border-right: 1px solid rgba(124,58,237,0.22) !important;
     }
     @media (min-width: 992px) {
         /* Customize expanded sidebar width */
@@ -441,9 +424,21 @@ def inject_css() -> None:
             max-width: 100% !important;
         }
     }
-    section[data-testid="stSidebar"] * { color: rgba(255,255,255,0.72) !important; }
-    section[data-testid="stSidebar"] strong { color: #A78BFA !important; }
-    section[data-testid="stSidebar"] hr {
+    /* Sidebar typography — high contrast; no blanket * selector */
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown p {
+        color: #F1F0FF !important;
+        -webkit-text-fill-color: #F1F0FF !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] b {
+        color: #C084FC !important;
+        -webkit-text-fill-color: #C084FC !important;
+    }
+    section[data-testid="stSidebar"] hr,
+    [data-testid="stSidebar"] hr {
         border: none !important; height: 1px !important;
         background: linear-gradient(90deg, transparent, rgba(124,58,237,0.45), rgba(6,182,212,0.25), transparent) !important;
         margin: 14px 0 !important;
@@ -866,13 +861,17 @@ def inject_css() -> None:
         font-size: 2rem; font-weight: 700; text-align: center;
     }
     .history-item {
-        background: rgba(255,255,255,0.05);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 10px; padding: 8px 10px; margin: 4px 0;
-        transition: border-color 0.3s;
+        background: rgba(255,255,255,0.07);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(123,92,240,0.22);
+        border-radius: 10px; padding: 10px 12px; margin: 6px 0;
+        transition: transform 0.3s var(--ease), border-color 0.3s, box-shadow 0.3s;
     }
-    .history-item:hover { border-color: rgba(124,58,237,0.40); }
+    .history-item:hover {
+        border-color: rgba(6,182,212,0.45);
+        transform: translateX(4px);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.25), -3px 0 16px rgba(123,92,240,0.15);
+    }
     .algo-card {
         background: rgba(255,255,255,0.06);
         backdrop-filter: blur(12px);
@@ -1103,7 +1102,7 @@ def inject_css() -> None:
     .sidebar-logo-sub {
         font-family: 'Space Grotesk', sans-serif;
         font-size: 0.60rem;
-        color: rgba(255,255,255,0.45);
+        color: rgba(241, 240, 255, 0.72);
         letter-spacing: 0.28em;
         text-transform: uppercase;
     }
@@ -1217,107 +1216,183 @@ def inject_css() -> None:
     .sidebar-mini-stat-label {
         font-family: 'Inter', sans-serif;
         font-size: 0.68rem;
-        color: var(--muted);
+        color: #A8A7C4;
         margin-top: 4px;
         text-transform: uppercase;
         letter-spacing: 0.06em;
+    }
+    .sidebar-stat-value {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.5rem;
+        font-weight: 900;
+        line-height: 1.2;
+    }
+    .sidebar-stat-label {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.65rem;
+        color: #A8A7C4;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-top: 6px;
+    }
+    .sidebar-muted {
+        color: #A8A7C4 !important;
+        -webkit-text-fill-color: #A8A7C4 !important;
     }
 
     </style>
     """), unsafe_allow_html=True)
 
-    # ── Background effects injected as HTML ───────────────────────────────────
+    # ── Global 3D background layer (fixed, behind all content) ────────────────
     import random as _rng_mod
     rng = _rng_mod.Random(42)
 
-    bg_html = []
+    bg_html = ['<div class="tl-bg-root" aria-hidden="true">']
+    bg_html.append('<div class="tl-bg-gradient"></div>')
+    bg_html.append('<canvas id="tl-bg-canvas"></canvas>')
+    bg_html.append('<div class="tl-dot-field"></div>')
+    bg_html.append('<div class="tl-grid-floor"></div>')
+    bg_html.append('<div class="tl-parallax-layer tl-parallax-1"></div>')
+    bg_html.append('<div class="tl-parallax-layer tl-parallax-2"></div>')
+    bg_html.append('<div class="tl-parallax-layer tl-parallax-3"></div>')
+    bg_html.append('<div class="tl-orb-sphere"></div>')
 
-    # Aurora orbs — cosmic palette
-    bg_html.append(
-        '<div class="aurora-orb" style="width:580px;height:580px;'
-        'background:radial-gradient(circle,rgba(124,58,237,0.22),transparent 70%);'
-        'top:-140px;left:-140px;animation-delay:0s;animation-duration:14s;"></div>'
-    )
-    bg_html.append(
-        '<div class="aurora-orb" style="width:480px;height:480px;'
-        'background:radial-gradient(circle,rgba(6,182,212,0.18),transparent 70%);'
-        'bottom:-110px;right:-110px;animation-delay:7s;animation-duration:18s;"></div>'
-    )
-    bg_html.append(
-        '<div class="aurora-orb" style="width:360px;height:360px;'
-        'background:radial-gradient(circle,rgba(167,139,250,0.14),transparent 70%);'
-        'top:40%;right:5%;animation-delay:14s;animation-duration:22s;"></div>'
-    )
-    bg_html.append(
-        '<div class="aurora-orb" style="width:300px;height:300px;'
-        'background:radial-gradient(circle,rgba(124,58,237,0.12),transparent 70%);'
-        'top:25%;left:8%;animation-delay:3s;animation-duration:16s;"></div>'
-    )
-
-    # Floating particles — z-index 9999 so they always float above everything
-    bg_html.append(
-        '<div style="position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden;">'
-    )
-    for _ in range(18):
-        sz    = rng.randint(4, 14)
-        left  = rng.randint(3, 97)
-        delay = rng.uniform(0, 18)
-        dur   = rng.uniform(10, 22)
+    for _ in range(20):
+        sz = rng.randint(3, 12)
+        left = rng.randint(2, 98)
+        delay = rng.uniform(0, 16)
+        dur = rng.uniform(11, 24)
         bg_html.append(
-            f'<div class="particle-3d" style="'
-            f'width:{sz}px;height:{sz}px;left:{left}%;bottom:-20px;'
-            f'animation-delay:{delay:.1f}s;animation-duration:{dur:.1f}s;'
-            f'opacity:0.90;"></div>'
+            f'<div class="tl-particle" style="width:{sz}px;height:{sz}px;left:{left}%;'
+            f'animation-delay:{delay:.1f}s;animation-duration:{dur:.1f}s;"></div>'
         )
 
-    # Vertical grid lines — z-index 9998 (below particles but above page)
-    bg_html.append('<div class="bg-grid-3d" style="z-index:9998;pointer-events:none;">')
-    for i in range(12):
-        left  = i * 8.5 + 2
-        delay = i * 0.65
-        dur   = 8.5 + i * 0.25
+    bg_html.append('<div class="tl-grid-lines">')
+    for i in range(10):
+        left = i * 9.5 + 3
+        delay = i * 0.7
+        dur = 9.0 + i * 0.3
         bg_html.append(
-            f'<div class="grid-line" style="'
-            f'left:{left:.1f}%;'
-            f'animation-delay:{delay:.1f}s;'
-            f'animation-duration:{dur:.1f}s;"></div>'
+            f'<div class="tl-grid-line" style="left:{left:.1f}%;'
+            f'animation-delay:{delay:.1f}s;animation-duration:{dur:.1f}s;"></div>'
         )
     bg_html.append('</div></div>')
 
     st.markdown("".join(bg_html), unsafe_allow_html=True)
 
-    # ── JS: Force cosmic gradient on ALL Streamlit wrappers at runtime ─────────
-    st.markdown("""
+    bg_js = _load_asset("background_3d.js")
+    if bg_js.strip():
+        components.html(
+            f"<script>{bg_js}</script>",
+            height=0,
+            scrolling=False,
+        )
+
+    # ── JS: Keep Streamlit wrappers transparent so background shows through ───
+    components.html("""
     <script>
-    (function applyCosmicTheme() {
-        const BG = 'linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%)';
-        const selectors = [
-            'html', 'body',
+    (function applyTransparentWrappers() {
+        var doc = window.parent.document;
+        var selectors = [
             '.stApp',
             '[data-testid="stAppViewContainer"]',
             '[data-testid="stAppViewBlockContainer"]',
             '[data-testid="stMain"]',
             '[data-testid="stMainBlockContainer"]',
+            '[data-testid="stSidebar"]',
+            '[data-testid="stSidebarContent"]',
+            '[data-testid="stSidebarUserContent"]',
             '.main',
             '.appview-container'
         ];
         function paint() {
+            var skipMinHeight = [
+                '[data-testid="stSidebarContent"]',
+                '[data-testid="stSidebarUserContent"]'
+            ];
             selectors.forEach(function(sel) {
-                document.querySelectorAll(sel).forEach(function(el) {
-                    el.style.setProperty('background', BG, 'important');
-                    el.style.setProperty('background-attachment', 'fixed', 'important');
-                    el.style.setProperty('min-height', '100vh', 'important');
+                doc.querySelectorAll(sel).forEach(function(el) {
+                    el.style.setProperty('background', 'transparent', 'important');
+                    el.style.setProperty('background-color', 'transparent', 'important');
+                    if (skipMinHeight.indexOf(sel) === -1) {
+                        el.style.setProperty('min-height', '100vh', 'important');
+                    }
                 });
             });
+            doc.querySelectorAll('[data-testid="stSidebar"] > div').forEach(function(el) {
+                el.style.setProperty('overflow-y', 'auto', 'important');
+                el.style.setProperty('height', '100vh', 'important');
+                el.style.setProperty('max-height', '100vh', 'important');
+            });
+            doc.documentElement.style.setProperty('background-color', '#030308', 'important');
+            doc.body.style.setProperty('background-color', '#030308', 'important');
         }
         paint();
-        // Re-apply after Streamlit re-renders
         var obs = new MutationObserver(paint);
-        obs.observe(document.body, {childList:true, subtree:true, attributes:false});
-        [200,400,600,800,1000,1500,2000,3000,5000].forEach(function(t){ setTimeout(paint, t); });
+        obs.observe(doc.body, {childList:true, subtree:true, attributes:false});
+        [200, 600, 1200, 2500].forEach(function(t){ setTimeout(paint, t); });
     })();
+
+    // #region agent log
+    (function debugSidebarScroll() {
+        var doc = window.parent.document;
+        var LOG = 'http://127.0.0.1:7860/ingest/1772ba8d-5439-41e9-aefa-b481d9b500d6';
+        function send(hypothesisId, message, data) {
+            fetch(LOG, {
+                method: 'POST',
+                headers: {'Content-Type':'application/json','X-Debug-Session-Id':'063631'},
+                body: JSON.stringify({
+                    sessionId:'063631', runId:'pre-fix', hypothesisId:hypothesisId,
+                    location:'app.py:inject_css:sidebar', message:message,
+                    data:data, timestamp:Date.now()
+                })
+            }).catch(function(){});
+        }
+        function measure() {
+            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            var inner = sidebar ? sidebar.querySelector(':scope > div') : null;
+            var content = doc.querySelector('[data-testid="stSidebarContent"]');
+            var userContent = doc.querySelector('[data-testid="stSidebarUserContent"]');
+            var particles = doc.querySelector('.tl-sidebar-edge-particles');
+            function snap(el, name) {
+                if (!el) return {name:name, missing:true};
+                var cs = window.getComputedStyle(el);
+                return {
+                    name:name,
+                    scrollHeight: el.scrollHeight,
+                    clientHeight: el.clientHeight,
+                    overflow: cs.overflow,
+                    overflowY: cs.overflowY,
+                    position: cs.position,
+                    minHeight: cs.minHeight,
+                    height: cs.height,
+                    pointerEvents: cs.pointerEvents,
+                    canScroll: el.scrollHeight > el.clientHeight
+                };
+            }
+            send('S1', 'Sidebar scroll metrics', {
+                sidebar: snap(sidebar, 'stSidebar'),
+                inner: snap(inner, 'stSidebarInner'),
+                content: snap(content, 'stSidebarContent'),
+                userContent: snap(userContent, 'stSidebarUserContent'),
+                particles: snap(particles, 'tl-sidebar-edge-particles'),
+                viewportH: window.parent.innerHeight
+            });
+        }
+        measure();
+        [400, 1200, 2500].forEach(function(t){ setTimeout(measure, t); });
+        var sb = doc.querySelector('[data-testid="stSidebar"]');
+        if (sb) {
+            sb.addEventListener('wheel', function(){ send('S3', 'Wheel on stSidebar', {fired:true}); }, {passive:true});
+        }
+        var uc = doc.querySelector('[data-testid="stSidebarUserContent"]');
+        if (uc) {
+            uc.addEventListener('wheel', function(){ send('S3', 'Wheel on stSidebarUserContent', {fired:true}); }, {passive:true});
+        }
+    })();
+    // #endregion
     </script>
-    """, unsafe_allow_html=True)
+    """, height=0, scrolling=False)
 
 
 
@@ -1340,8 +1415,8 @@ def init_session_state() -> None:
         "pipeline": None,               # Lazy-loaded PredictionPipeline
         "models_loaded": False,          # Whether models are on disk
         "3d_mode": True,                 # Enable 3D visualizations
-        "claude_qa_history": [],         # Claude Q&A conversation history
-        "claude_question_input": "",     # Pre-fill for question box
+        "ai_qa_history": [],             # AI Q&A conversation history
+        "ai_question_input": "",         # Pre-fill for question box
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -1431,6 +1506,10 @@ def render_sidebar() -> None:
     """Render the application sidebar with navigation and settings."""
     with st.sidebar:
         st.markdown(clean_html("""
+        <div class="tl-sidebar-edge-particles" aria-hidden="true">
+            <span></span><span></span><span></span>
+            <span></span><span></span><span></span>
+        </div>
         <div class="sidebar-logo-wrap truthlens-logo">
             <span class="sidebar-logo-text">TRUTHLENS</span>
             <span class="sidebar-logo-sub">See Through the Noise</span>
@@ -1449,54 +1528,54 @@ def render_sidebar() -> None:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown(clean_html(f"""
-            <div style="background:rgba(123,92,240,0.12); border:1px solid rgba(123,92,240,0.25);
-                        border-radius:12px; padding:12px; text-align:center;">
-              <div style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; font-weight:900;
-                          color:#06B6D4;">{st.session_state.get('analyses_count', 0)}</div>
-              <div style="font-size:0.65rem; color:#8B8AA8; text-transform:uppercase;
-                          letter-spacing:0.08em; font-family:'Inter',sans-serif;">Analyses Done</div>
+            <div class="sidebar-stat-card">
+              <div class="sidebar-stat-value" style="color:#06B6D4;">{st.session_state.get('analyses_count', 0)}</div>
+              <div class="sidebar-stat-label">Analyses Done</div>
             </div>
             """), unsafe_allow_html=True)
         with col_b:
             st.markdown(clean_html(f"""
-            <div style="background:rgba(123,92,240,0.12); border:1px solid rgba(123,92,240,0.25);
-                        border-radius:12px; padding:12px; text-align:center;">
-              <div style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; font-weight:900;
-                          color:#C084FC;">{st.session_state.get('truth_hunter_points', 0)}</div>
-              <div style="font-size:0.65rem; color:#8B8AA8; text-transform:uppercase;
-                          letter-spacing:0.08em; font-family:'Inter',sans-serif;">Total Points</div>
+            <div class="sidebar-stat-card">
+              <div class="sidebar-stat-value" style="color:#C084FC;">{st.session_state.get('truth_hunter_points', 0)}</div>
+              <div class="sidebar-stat-label">Total Points</div>
             </div>
             """), unsafe_allow_html=True)
 
         st.divider()
 
         # ── Gamification ─────────────────────────────────────────────────────
-        st.markdown("**🏆 TruthHunter Score**")
+        st.markdown(
+            '<div class="sidebar-section-title">🏆 TruthHunter Score</div>',
+            unsafe_allow_html=True,
+        )
         points = st.session_state.truth_hunter_points
         _render_badge_system(points)
 
         st.divider()
 
         # ── Session History ──────────────────────────────────────────────────
-        st.markdown("**📋 Recent Analyses**")
+        st.markdown(
+            '<div class="sidebar-section-title">📋 Recent Analyses</div>',
+            unsafe_allow_html=True,
+        )
         history = st.session_state.analysis_history[-10:][::-1]
 
         if not history:
             st.markdown(
-                "<div style='font-size:0.8rem; color:#8892A4;'>No analyses yet.</div>",
+                "<div class='sidebar-muted' style='font-size:0.85rem; padding:8px 4px;'>"
+                "No analyses yet — run your first check!</div>",
                 unsafe_allow_html=True
             )
         else:
             for i, item in enumerate(history[:5]):
                 score = item.get("truth_score", 0)
-                verdict = item.get("verdict", "?")
                 preview = item.get("text_preview", "")[:40] + "..."
-                color = "#FF4444" if score < 30 else "#FFB800" if score < 55 else "#00C851"
+                color = "#FF6B6B" if score < 30 else "#FBBF24" if score < 55 else "#34D399"
                 st.markdown(
-                    f"""<div class='history-item'>
-<span style='color:{color}; font-size:1rem;'>●</span>
-<span style='font-size:0.88rem; color:#F0F4FF; margin-left:6px;'>{preview}</span><br>
-<span style='font-size:0.80rem; color:#8892A4; margin-left:18px;'>Score: {score:.0f}/100</span>
+                    f"""<div class='history-item' style='animation-delay:{0.08 * i:.2f}s;'>
+<span style='color:{color}; font-size:1rem; text-shadow:0 0 8px {color}55;'>●</span>
+<span style='font-size:0.88rem; color:#F1F0FF; margin-left:6px;'>{preview}</span><br>
+<span class='sidebar-muted' style='font-size:0.80rem; margin-left:18px;'>Score: {score:.0f}/100</span>
 </div>""",
                     unsafe_allow_html=True
                 )
@@ -1504,6 +1583,19 @@ def render_sidebar() -> None:
             if len(history) > 1:
                 scores = [h["truth_score"] for h in history]
                 _render_mini_trend(scores)
+
+        # #region agent log
+        _debug_log(
+            "app.py:render_sidebar",
+            "Sidebar content rendered",
+            {
+                "history_count": len(history),
+                "analyses_count": st.session_state.get("analyses_count", 0),
+                "points": st.session_state.get("truth_hunter_points", 0),
+            },
+            "S4",
+        )
+        # #endregion
 
         st.divider()
 
@@ -1548,11 +1640,13 @@ def _render_badge_system(points: int) -> None:
 
     _, badge_name, badge_color = current_badge
     st.markdown(
-        f"<div class='points-display' style='color:{badge_color};'>{points} pts</div>",
+        f"<div class='points-display' style='color:{badge_color};-webkit-text-fill-color:{badge_color};'>"
+        f"{points} pts</div>",
         unsafe_allow_html=True
     )
     st.markdown(
-        f"<div style='text-align:center; font-size:0.9rem; color:{badge_color};'>{badge_name}</div>",
+        f"<div style='text-align:center; font-size:0.9rem; color:{badge_color};"
+        f"-webkit-text-fill-color:{badge_color}; font-weight:600;'>{badge_name}</div>",
         unsafe_allow_html=True
     )
 
@@ -1562,7 +1656,7 @@ def _render_badge_system(points: int) -> None:
         remaining = next_threshold - points
         st.progress(progress)
         st.markdown(
-            f"<div style='font-size:0.72rem; color:#8892A4; text-align:center;'>"
+            f"<div class='sidebar-muted' style='font-size:0.75rem; text-align:center; margin-top:6px;'>"
             f"{remaining} pts to {next_name}</div>",
             unsafe_allow_html=True
         )
@@ -2946,86 +3040,135 @@ def generate_pdf_report(result: dict) -> bytes:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Claude AI Integration
+# AI Analysis (Google Gemini + local fallback)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _claude_available() -> bool:
-    """Return True if Claude integration is properly configured."""
-    return HAS_ANTHROPIC and bool(ANTHROPIC_API_KEY)
+def _ai_available() -> bool:
+    """Return True if Gemini integration is properly configured."""
+    available = HAS_GENAI and bool(AI_API_KEY)
+    # #region agent log
+    _debug_log(
+        "app.py:_ai_available",
+        "AI availability check",
+        {"has_genai": HAS_GENAI, "api_key_present": bool(AI_API_KEY), "available": available},
+        "C2",
+    )
+    # #endregion
+    return available
 
 
-def _call_claude_with_fallback(client, create_params: dict) -> str:
-    """
-    Call Anthropic API with model fallbacks to handle cases where a specific model
-    (e.g., claude-3-5-sonnet-20241022) is not available or disabled on the API key.
-    """
+def _call_gemini(prompt: str, system: str = "", max_tokens: int = 512) -> str:
+    """Call Google Gemini with model fallbacks."""
+    _genai_lib.configure(api_key=AI_API_KEY)
     models = [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-sonnet-20240620",
-        "claude-3-5-haiku-20241022",
-        "claude-3-haiku-20240307"
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
     ]
-    
-    requested_model = create_params.get("model")
-    if requested_model and requested_model in models:
-        models.remove(requested_model)
-        models.insert(0, requested_model)
-    elif requested_model:
-        models.insert(0, requested_model)
-
     last_err = None
-    for model in models:
+    for model_name in models:
         try:
-            params = create_params.copy()
-            params["model"] = model
-            message = client.messages.create(**params)
-            return message.content[0].text.strip()
+            model = _genai_lib.GenerativeModel(
+                model_name,
+                system_instruction=system or None,
+            )
+            response = model.generate_content(
+                prompt,
+                generation_config={"max_output_tokens": max_tokens},
+            )
+            text = (response.text or "").strip()
+            if text:
+                return text
         except Exception as e:
             last_err = e
             err_str = str(e).lower()
-            # Fall back on 400 errors or model availability errors
-            if "400" in err_str or "model" in err_str or "not_found" in err_str:
-                logger.warning(f"Claude model {model} failed. Trying next fallback model. Error: {e}")
+            if "404" in err_str or "not found" in err_str or "model" in err_str:
+                logger.warning(f"Gemini model {model_name} failed, trying next. Error: {e}")
                 continue
-            else:
-                # Re-raise authentication or billing errors immediately (e.g. 401, 403)
-                raise e
-                
-    raise last_err
+            raise
+    if last_err:
+        raise last_err
+    return ""
 
 
-def _extract_claude_error_message(e: Exception) -> str:
-    """Extract a user-friendly error message from an Anthropic API exception."""
-    error_msg = str(e)
-    if hasattr(e, "body") and isinstance(e.body, dict):
-        api_err = e.body.get("error", {})
-        if isinstance(api_err, dict) and api_err.get("message"):
-            error_msg = api_err.get("message")
-    return f"⚠️ Claude API error: {error_msg}"
-
-
-def claude_credibility_brief(result: dict) -> str:
-    """
-    Generate a concise AI Credibility Brief using Claude.
-
-    Parameters
-    ----------
-    result : dict — full analysis result
-
-    Returns
-    -------
-    str — Claude's brief analysis text
-    """
-    if not _claude_available():
-        return ""
-
+def _local_credibility_brief(result: dict) -> str:
+    """Generate a credibility brief from TruthLens ML signals (no API needed)."""
     verdict = result.get("verdict", "UNKNOWN")
     truth_score = result.get("truth_score", 50)
+    red_flags = result.get("red_flags", [])[:3]
+    breakdown = result.get("credibility_breakdown", {})
+
+    if truth_score >= 55:
+        verdict_emoji = "✅"
+        verdict_line = f"Overall verdict: {verdict} ({truth_score:.0f}/100) — the article shows credible signals."
+    elif truth_score >= 30:
+        verdict_emoji = "⚠️"
+        verdict_line = f"Overall verdict: {verdict} ({truth_score:.0f}/100) — treat claims with caution and verify independently."
+    else:
+        verdict_emoji = "🚨"
+        verdict_line = f"Overall verdict: {verdict} ({truth_score:.0f}/100) — multiple misinformation indicators detected."
+
+    if red_flags:
+        flag_line = f"🚩 Key concern: {red_flags[0]}"
+    else:
+        top_signal = next(iter(breakdown.items()), ("writing style", 0))
+        flag_line = f"📊 Top signal: {top_signal[0]} scored {top_signal[1]:.0f}/100 in our analysis."
+
+    rec = (
+        "🔍 Cross-check this story on Google News and read the original sources cited."
+        if truth_score < 55
+        else "📖 Still verify the main claim against primary sources before sharing."
+    )
+    return f"{verdict_emoji} {verdict_line}\n{flag_line}\n{rec}"
+
+
+def _local_ask_answer(question: str, result: dict) -> str:
+    """Answer common questions using TruthLens analysis data (no API needed)."""
+    q = question.lower()
+    truth_score = result.get("truth_score", 50)
+    verdict = result.get("verdict", "UNKNOWN")
     red_flags = result.get("red_flags", [])
     breakdown = result.get("credibility_breakdown", {})
-    text_preview = result.get("text", "")[:600]
 
-    prompt = f"""You are TruthLens AI, an expert fact-checker and media literacy assistant.
+    if any(w in q for w in ("red flag", "warning", "suspicious", "fake")):
+        if red_flags:
+            return "🚩 " + " ".join(f"• {f}" for f in red_flags[:3])
+        return f"⚠️ TruthScore™ is {truth_score:.0f}/100 ({verdict}). No strong red flags, but always verify claims independently."
+
+    if any(w in q for w in ("bias", "emotional", "language")):
+        style = breakdown.get("writing_style", breakdown.get("sentiment", 50))
+        if style < 45:
+            return "⚠️ The writing style score suggests emotionally charged or sensational language — a common misinformation tactic."
+        return "✅ Language appears relatively balanced, though bias can still exist in framing or omitted context."
+
+    if any(w in q for w in ("source", "verify", "check", "fact")):
+        return (
+            "🔍 Search the headline on Google News, check Snopes or PolitiFact, "
+            "and read any cited study or report directly at the source."
+        )
+
+    if any(w in q for w in ("credible", "trust", "reliable")):
+        return (
+            f"📊 TruthLens scored this {truth_score:.0f}/100 ({verdict}). "
+            f"{'It shows credible signals, but confirm key claims yourself.' if truth_score >= 55 else 'Exercise caution and verify before trusting or sharing.'}"
+        )
+
+    return (
+        f"📊 Based on TruthLens analysis: TruthScore™ {truth_score:.0f}/100, verdict {verdict}. "
+        "Add a free Gemini key to `.env` as `AI_API_KEY` for deeper AI answers."
+    )
+
+
+def ai_credibility_brief(result: dict) -> str:
+    """Generate a concise AI Credibility Brief using Gemini or local fallback."""
+    if _ai_available():
+        verdict = result.get("verdict", "UNKNOWN")
+        truth_score = result.get("truth_score", 50)
+        red_flags = result.get("red_flags", [])
+        breakdown = result.get("credibility_breakdown", {})
+        text_preview = result.get("text", "")[:600]
+
+        prompt = f"""You are TruthLens AI, an expert fact-checker and media literacy assistant.
 
 Article excerpt (first 600 chars):
 \"\"\"{text_preview}\"\"\"
@@ -3043,46 +3186,34 @@ Provide a concise Credibility Brief in exactly 3 short bullet points (each ≤ 2
 
 Format: Start each bullet with a relevant emoji. Be direct, factual, educational."""
 
-    try:
-        client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
-        return _call_claude_with_fallback(client, {
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 256,
-            "messages": [{"role": "user", "content": prompt}]
-        })
-    except Exception as e:
-        logger.error(f"Claude brief failed: {e}")
-        return _extract_claude_error_message(e)
+        try:
+            return _call_gemini(prompt, max_tokens=256)
+        except Exception as e:
+            logger.error(f"Gemini brief failed, using local fallback: {e}")
+            # #region agent log
+            _debug_log(
+                "app.py:ai_credibility_brief",
+                "Gemini failed, local fallback",
+                {"error_type": type(e).__name__, "error_msg": str(e)[:120]},
+                "C3",
+            )
+            # #endregion
+
+    return _local_credibility_brief(result)
 
 
-def claude_ask_question(article_text: str, question: str, result: dict) -> str:
-    """
-    Answer a user question about the article using Claude.
+def ai_ask_question(article_text: str, question: str, result: dict) -> str:
+    """Answer a user question about the article using Gemini or local fallback."""
+    if _ai_available():
+        truth_score = result.get("truth_score", 50)
+        verdict = result.get("verdict", "UNKNOWN")
+        text_preview = article_text[:800]
 
-    Parameters
-    ----------
-    article_text : str
-    question : str
-    result : dict — analysis result for context
-
-    Returns
-    -------
-    str — Claude's answer
-    """
-    if not _claude_available():
-        return ""
-
-    truth_score = result.get("truth_score", 50)
-    verdict = result.get("verdict", "UNKNOWN")
-    text_preview = article_text[:800]
-
-    system_prompt = (
-        "You are TruthLens AI, a helpful media literacy and fact-checking assistant. "
-        "You help students and readers evaluate news credibility. Be concise, educational, "
-        "and evidence-based. Never make up facts."
-    )
-
-    user_prompt = f"""Article (excerpt):
+        system_prompt = (
+            "You are TruthLens AI, a helpful media literacy and fact-checking assistant. "
+            "Be concise, educational, and evidence-based. Never make up facts."
+        )
+        user_prompt = f"""Article (excerpt):
 \"\"\"{text_preview}\"\"\"
 
 AI analysis: TruthScore™ = {truth_score:.0f}/100, Verdict = {verdict}
@@ -3091,61 +3222,48 @@ User question: {question}
 
 Answer in 2-3 sentences. Be specific to this article. Start with a relevant emoji."""
 
-    try:
-        client = _anthropic_lib.Anthropic(api_key=ANTHROPIC_API_KEY)
-        return _call_claude_with_fallback(client, {
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 320,
-            "messages": [{"role": "user", "content": user_prompt}],
-            "system": system_prompt
-        })
-    except Exception as e:
-        logger.error(f"Claude question failed: {e}")
-        return _extract_claude_error_message(e)
+        try:
+            return _call_gemini(user_prompt, system=system_prompt, max_tokens=320)
+        except Exception as e:
+            logger.error(f"Gemini question failed, using local fallback: {e}")
+            # #region agent log
+            _debug_log(
+                "app.py:ai_ask_question",
+                "Gemini failed, local fallback",
+                {"error_type": type(e).__name__, "error_msg": str(e)[:120]},
+                "C3",
+            )
+            # #endregion
+
+    return _local_ask_answer(question, result)
 
 
-def render_claude_panel(result: dict) -> None:
-    """
-    Render the Claude AI panel: AI Credibility Brief + Ask Claude Q&A.
-
-    Parameters
-    ----------
-    result : dict — full analysis result
-    """
+def render_ai_panel(result: dict) -> None:
+    """Render the AI panel: Credibility Brief + Ask AI Q&A."""
     st.markdown("---")
     st.markdown(
         '<h3 style="font-family:\'Space Grotesk\'; font-weight:800; margin-bottom:4px;">'
-        '&#129302; Claude AI Analysis <span class="ai-badge">&#9679; Powered by Anthropic</span>'
+        '&#129302; AI Analysis <span class="ai-badge">&#9679; TruthLens AI</span>'
         '</h3>',
         unsafe_allow_html=True
     )
-    st.caption("Claude reads the article and provides expert media-literacy insights.")
+    if _ai_available():
+        st.caption("Powered by Google Gemini — expert media-literacy insights from your article.")
+    else:
+        st.caption(
+            "Using TruthLens ML signals. Add a free key: get one at aistudio.google.com "
+            "and set `AI_API_KEY=your_key` in `.env`."
+        )
 
-    if not _claude_available():
-        st.markdown("""
-        <div class="claude-card" style="border-left-color:#FFB800;">
-            <div style="color:#FFB800; font-weight:600; margin-bottom:6px;">&#9888;&#65039; Claude AI not configured</div>
-            <div style="color:#8892A4; font-size:0.85rem; line-height:1.6;">
-                To enable Claude AI features:<br>
-                1. Get an API key at <code>console.anthropic.com</code><br>
-                2. Add <code>ANTHROPIC_API_KEY=your_key</code> to <code>.env</code><br>
-                3. Install: <code>pip install anthropic python-dotenv</code>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        return
+    tab_brief, tab_ask = st.tabs(["&#129300; AI Credibility Brief", "&#128172; Ask AI"])
 
-    tab_brief, tab_ask = st.tabs(["&#129300; AI Credibility Brief", "&#128172; Ask Claude"])
-
-    # Cache the generated brief for the current article analysis so repeated
-    # reruns do not trigger an API call unless the user explicitly regenerates it.
     article_signature = (
         f"{result.get('verdict', 'UNKNOWN')}|"
         f"{result.get('truth_score', 50)}|"
         f"{result.get('text', '')[:200]}"
     )
-    brief_key = "claude_brief_cache"
-    brief_sig_key = "claude_brief_signature"
+    brief_key = "ai_brief_cache"
+    brief_sig_key = "ai_brief_signature"
 
     with tab_brief:
         st.markdown(
@@ -3158,8 +3276,8 @@ def render_claude_panel(result: dict) -> None:
             brief_key not in st.session_state
             or st.session_state.get(brief_sig_key) != article_signature
         ):
-            with st.spinner("&#129302; Claude is writing your credibility brief..."):
-                st.session_state[brief_key] = claude_credibility_brief(result)
+            with st.spinner("&#129302; Generating your credibility brief..."):
+                st.session_state[brief_key] = ai_credibility_brief(result)
                 st.session_state[brief_sig_key] = article_signature
 
         brief = st.session_state.get(brief_key, "")
@@ -3168,13 +3286,14 @@ def render_claude_panel(result: dict) -> None:
                 f'<div class="claude-card">{brief}</div>',
                 unsafe_allow_html=True
             )
+            source = "Gemini" if _ai_available() else "TruthLens ML"
             st.markdown(
-                '<div style="font-size:0.72rem; color:#8892A4; margin-top:10px; text-align:right;">'
-                '&#129302; Generated by Claude Sonnet | TruthLens AI 2025</div>',
+                f'<div style="font-size:0.72rem; color:#8892A4; margin-top:10px; text-align:right;">'
+                f'&#129302; Generated by {source} | TruthLens AI 2025</div>',
                 unsafe_allow_html=True
             )
         else:
-            st.info("Claude did not return a brief for this article.")
+            st.info("Could not generate a brief for this article.")
 
         if st.button("&#128260; Regenerate Brief", key="regen_brief"):
             if brief_key in st.session_state:
@@ -3183,15 +3302,13 @@ def render_claude_panel(result: dict) -> None:
                 del st.session_state[brief_sig_key]
             st.rerun()
 
-    # ── Tab 2: Ask Claude ─────────────────────────────────────────────────────
     with tab_ask:
         st.markdown(
             '<p style="color:#8892A4; font-size:0.85rem;">'
-            'Ask Claude any question about this article — fact-checking, bias, credibility, or media literacy.</p>',
+            'Ask any question about this article — fact-checking, bias, credibility, or media literacy.</p>',
             unsafe_allow_html=True
         )
 
-        # Quick question chips
         quick_qs = [
             "What are the main red flags in this article?",
             "Is the language biased or emotional?",
@@ -3203,33 +3320,31 @@ def render_claude_panel(result: dict) -> None:
         for idx, qtext in enumerate(quick_qs):
             with q_cols[idx % 2]:
                 if st.button(qtext, key=f"quick_q_{idx}", use_container_width=True):
-                    st.session_state["claude_question_input"] = qtext
+                    st.session_state["ai_question_input"] = qtext
 
         question = st.text_input(
             "Your question:",
-            value=st.session_state.get("claude_question_input", ""),
+            value=st.session_state.get("ai_question_input", ""),
             placeholder="e.g. Is this article biased? What sources are cited?",
-            key="claude_question_field"
+            key="ai_question_field"
         )
 
-        if st.button("&#128172; Ask Claude", key="ask_claude_btn") and question.strip():
-            with st.spinner("&#129302; Claude is thinking..."):
-                answer = claude_ask_question(result.get("text", ""), question, result)
+        if st.button("&#128172; Ask AI", key="ask_ai_btn") and question.strip():
+            with st.spinner("&#129302; Thinking..."):
+                answer = ai_ask_question(result.get("text", ""), question, result)
 
             st.markdown(
                 f'<div class="claude-card">{answer}</div>',
                 unsafe_allow_html=True
             )
 
-            # Save Q&A to history
-            if "claude_qa_history" not in st.session_state:
-                st.session_state.claude_qa_history = []
-            st.session_state.claude_qa_history.append({"q": question, "a": answer})
+            if "ai_qa_history" not in st.session_state:
+                st.session_state.ai_qa_history = []
+            st.session_state.ai_qa_history.append({"q": question, "a": answer})
 
-        # Show previous Q&A if any
-        if st.session_state.get("claude_qa_history"):
+        if st.session_state.get("ai_qa_history"):
             with st.expander("&#128196; Previous Questions", expanded=False):
-                for qa in reversed(st.session_state.claude_qa_history[-5:]):
+                for qa in reversed(st.session_state.ai_qa_history[-5:]):
                     st.markdown(
                         f'<div style="margin-bottom:10px;">'
                         f'<div style="color:#8892A4; font-size:0.78rem; margin-bottom:4px;">'
@@ -3554,9 +3669,9 @@ def render_dashboard(result: dict) -> None:
                 unsafe_allow_html=True
             )
 
-    # ── Section H: Claude AI Panel ────────────────────────────────────────────
+    # ── Section H: AI Analysis Panel ────────────────────────────────────────────
     st.markdown("---")
-    render_claude_panel(result)
+    render_ai_panel(result)
 
     # ── Section I: Cluster Explorer ───────────────────────────────────────────
     with st.expander("🗺️ Article Cluster Map — Where does your article fall?", expanded=False):
@@ -3675,7 +3790,7 @@ def render_app_footer() -> None:
         AI Fake News Detector · IBM Edunet Internship Project · Built by Sinega Selvakumar
       </div>
       <div style="color:#8B8AA8; font-size:0.70rem; margin-top:4px; font-family:'Inter',sans-serif;">
-        9 ML Models · Claude AI · WELFake Dataset (72,134 articles)
+        9 ML Models · AI Analysis · WELFake Dataset (72,134 articles)
       </div>
     </div>
     """), unsafe_allow_html=True)
@@ -3699,7 +3814,7 @@ def main() -> None:
     </h1>
     <p class="lueio-subtitle">
     TruthLens analyzes articles using <b style="color:#C084FC;">9 ML models</b> +
-    <b style="color:#06B6D4;">Claude AI</b> to deliver an explainable credibility
+    <b style="color:#06B6D4;">AI Analysis</b> to deliver an explainable credibility
     verdict in seconds — built for <b style="color:#F1F0FF;">students, educators &amp;
     fact-checkers</b>.
     </p>
@@ -3802,7 +3917,7 @@ def _render_welcome() -> None:
         </h2>
         <p style="color:#8B8AA8; font-size:0.92rem; max-width:520px; margin:0 auto; line-height:1.65;">
             Paste any article, enter a URL, or upload a screenshot — let
-            <b style="color:#C084FC;">9 AI models</b> + <b style="color:#06B6D4;">Claude AI</b>
+            <b style="color:#C084FC;">9 AI models</b> + <b style="color:#06B6D4;">AI Analysis</b>
             analyze its credibility instantly.
         </p>
     </div>
@@ -3811,7 +3926,7 @@ def _render_welcome() -> None:
     features = [
         ("📊", "TruthScore™ Gauge",     "0–100 animated credibility score with 3D depth visualization"),
         ("🤖", "9 ML Models",           "LR, RF, PAC, SVC, Ensemble, BERT, K-Means, Isolation Forest, CosSim"),
-        ("✨", "Claude AI",             "Expert credibility brief & interactive Ask-Claude Q&A panel"),
+        ("✨", "AI Analysis",             "Expert credibility brief & interactive Ask-AI Q&A panel"),
         ("🔍", "XAI Explainability",    "LIME word-level highlights — understand exactly why AI flagged content"),
         ("🗺️", "Cluster Explorer",      "See where your article lands in a 3D news landscape map"),
         ("🏆", "TruthHunter Badges",    "Earn points & badges for every article you fact-check"),
