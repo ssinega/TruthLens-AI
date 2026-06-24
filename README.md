@@ -41,8 +41,6 @@
 | ☁️ **Red-Flag Wordcloud** | Top 10 suspicious words highlighted visually |
 | 🎓 **Learning Module** | Algorithm explanations + fact-check tips + credibility checklist |
 | 🏆 **Gamification** | TruthHunter points, badge system, session leaderboard |
-| 📥 **PDF Export** | Download complete analysis report |
-| ⚡ **Demo Mode** | Instant results without trained models (perfect for demos) |
 | 🌐 **Language Detection** | Warning for non-English articles |
 | 🤖 **Claude AI Brief** | Anthropic Claude generates a 3-bullet credibility brief per article |
 | 💬 **Ask Claude** | Interactive Q&A — ask Claude anything about the article |
